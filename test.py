@@ -17,20 +17,20 @@ import pandas as pd
 
 import os
 
+"Import CSV and Image Folder"
 
 dataset = pd.read_csv("_classes.csv")
 
-print(dataset.info())
+print(dataset.info()) #Imported CSV with labels and filenames of images
 
 image_folder = "train"
 
 images = []
 
-for filename in dataset['filename']:
-    # Create the full path to the image
-    img_path = os.path.join(image_folder, filename.strip())
+for filename in dataset['filename']: #for each file name in the dataset in column filename
+    img_path = os.path.join(image_folder, filename.strip()) #join the path for the image and the filename together
     
-    if os.path.exists(img_path):
+    if os.path.exists(img_path): #if the path exists, do try except to open image and append image to list of images
         try:
             image = Image.open(img_path)
             images.append(image)
@@ -40,4 +40,4 @@ for filename in dataset['filename']:
         print(f"Image not found: {img_path}")
 
 # Check the number of loaded images
-print(f"Loaded {len(images)} images.")
+print(f"Loaded {len(images)} images.") #Loaded all 2000 images!
