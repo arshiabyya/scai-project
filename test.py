@@ -8,7 +8,7 @@ import pandas as pd
 import os
 import torch.nn as nn
 import torch.optim as optim
-
+from torch.utils.data import WeightedRandomSampler
 
 "Import CSV and Image Folder"
 
@@ -85,38 +85,63 @@ image_paths = [os.path.join(image_folder, filename.strip()) for filename in filt
 
 filtered_dataset = ImageFolderDataset(image_paths, labels)
 
-dataloader = DataLoader(filtered_dataset, batch_size=8, shuffle=True)
+# Count how many samples exist per class
+class_counts = filtered_dataset.labels.sum(axis=0)  # labels is a numpy array
+class_weights = 1.0 / class_counts  # inverse frequency for each class
+
+# Assign a weight to each sample based on its label
+sample_weights = [class_weights[label.argmax()] for label in filtered_dataset.labels]
+
+# Create the sampler
+sampler = WeightedRandomSampler(
+    weights=sample_weights,
+    num_samples=len(sample_weights),
+    replacement=True
+)
+
+# Replace your DataLoader to use the sampler
+dataloader = DataLoader(filtered_dataset, batch_size=8, sampler=sampler)
 
 """Testing and Training Loop"""
 class ConvCAT (nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
-        
         self.relu = nn.ReLU()
         self.pool = nn.MaxPool2d(2, 2)
-        
+
+        # Convolutional layers
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
+
+        # Global pooling
         self.global_pool = nn.AdaptiveAvgPool2d(1)
 
-        self.linear1 = nn.Linear(32, 512)
+        # Fully connected layers
+        self.linear1 = nn.Linear(128, 512)
+        self.dropout = nn.Dropout(0.5)
         self.linear2 = nn.Linear(512, labels.shape[1])
 
     def forward(self,x):
-        x = self.conv1(x)
-        x = self.relu(x)
+        x = self.relu(self.conv1(x))
         x = self.pool(x)
 
-        x = self.conv2(x)
-        x = self.relu(x)
+        x = self.relu(self.conv2(x))
+        x = self.pool(x)
+
+        x = self.relu(self.conv3(x))
+        x = self.pool(x)
+
+        x = self.relu(self.conv4(x))
         x = self.pool(x)
 
         x = self.global_pool(x)
         x = x.flatten(start_dim=1)
-        x = self.linear1(x)
-        x = self.relu(x)
-        x = self.linear2(x)
 
+        x = self.relu(self.linear1(x))
+        x = self.dropout(x)
+        x = self.linear2(x)
         return x
 
 model = ConvCAT()
@@ -127,8 +152,8 @@ for images, labels in dataloader: #loop through each image and labels
 
 criterion = nn.BCEWithLogitsLoss()
 
-optimizer = optim.Adam(model.parameters(), lr=0.0001)
-num_epochs = 10 #change for time constraints and increase to improve accuracy
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+num_epochs = 50 #change for time constraints and increase to improve accuracy
 for epoch in range(num_epochs):
     model.train()
     batch_loss = 0.0
@@ -162,10 +187,10 @@ def predict_single_image(image_path):
         model.eval()
         output = model(image)
 
-    predicted_label = torch.sigmoid(output)
-    print(f"Predicted probabilities: {predicted_label}") #show the probabilities for each lable
-    predicted_label = predicted_label > 0.5  # Apply threshold
-    
+        predicted_probs = torch.sigmoid(output)
+        print(f"Predicted probabilities: {predicted_probs}")  # show probs
+        predicted_label = (predicted_probs > 0.3).int()  # Apply lower threshold
+
     label_names = ['Attentive', 'Relaxed', 'Uncomfortable']
     predicted_classes = [label_names[i] for i, value in enumerate(predicted_label[0]) if value.item()]
     
